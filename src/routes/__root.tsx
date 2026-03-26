@@ -6,9 +6,9 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { getSessionId } from "#/lib/session-functions";
 import Footer from "../components/Footer";
 import Header from "../components/Header";
-
 import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
 import TanStackQueryProvider from "../integrations/tanstack-query/root-provider";
 import appCss from "../styles.css?url";
@@ -40,6 +40,10 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 			},
 		],
 	}),
+	beforeLoad: async () => {
+		const sessionId = await getSessionId();
+		return { sessionId };
+	},
 	shellComponent: RootDocument,
 });
 

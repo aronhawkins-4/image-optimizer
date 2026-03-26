@@ -2,7 +2,7 @@ import { useForm, useStore } from "@tanstack/react-form";
 import JSZip from "jszip";
 import { LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { optimizeImage } from "#/lib/image-functions";
+import { optimizeImage } from "#/lib/optimization-functions";
 import { FileDropzone } from "./FileDropzone";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -161,19 +161,22 @@ export const UploadForm = () => {
 								}
 							}}
 						>
-							<ToggleGroupItem value="avif" className="min-w-fit">
+							<ToggleGroupItem value="avif" className="min-w-fit rounded-lg">
 								.avif
 							</ToggleGroupItem>
-							<ToggleGroupItem value="webp" className="min-w-fit">
+							<ToggleGroupItem value="webp" className="min-w-fit rounded-lg">
 								.webp
 							</ToggleGroupItem>
-							<ToggleGroupItem value="png" className="min-w-fit">
+							<ToggleGroupItem value="png" className="min-w-fit rounded-lg">
 								.png
 							</ToggleGroupItem>
-							<ToggleGroupItem value="jpg" className="min-w-fit">
+							<ToggleGroupItem value="jpg" className="min-w-fit rounded-lg">
 								.jpg
 							</ToggleGroupItem>
-							<ToggleGroupItem value="original" className="min-w-fit">
+							<ToggleGroupItem
+								value="original"
+								className="min-w-fit rounded-lg"
+							>
 								original
 							</ToggleGroupItem>
 						</ToggleGroup>

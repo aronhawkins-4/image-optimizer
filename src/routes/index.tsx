@@ -1,19 +1,35 @@
 import { useForm, useStore } from "@tanstack/react-form";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouteContext } from "@tanstack/react-router";
 import JSZip from "jszip";
 import { ArrowRight, Download, LoaderCircle, RefreshCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { da } from "zod/v4/locales";
 import { FileDropzone } from "#/components/FileDropzone";
-
 import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Slider } from "#/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
-import { optimizeImage } from "#/lib/image-functions";
+import { authClient } from "#/lib/auth-client";
+import {
+	createOptimizationRecord,
+	getOptimizationsCountBySession,
+	optimizeImage,
+} from "#/lib/optimization-functions";
 import { formatFileSize } from "#/lib/utils";
 
-export const Route = createFileRoute("/")({ component: App });
+export const Route = createFileRoute("/")({
+	loader: async ({ context }) => {
+		const session = await authClient.getSession();
+		if (!session?.data?.user) {
+			const dailyOptimizationsCount = await getOptimizationsCountBySession({
+				data: { sessionId: context.sessionId },
+			});
+			return dailyOptimizationsCount;
+		}
+	},
+	component: App,
+});
 
 export interface FormInput {
 	files: File[] | undefined;
@@ -29,9 +45,12 @@ export interface DownloadData {
 }
 
 function App() {
+	const dailyOptimizationsCount = Route.useLoaderData();
+	const [dailyLimitReached, setDailyLimitReached] = useState(false);
 	const [downloadData, setDownloadData] = useState<DownloadData[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
-	// const [fileType, setFileType] = useState<FormInput["fileType"]>("webp");
+	const { data: session } = authClient.useSession();
+	const { sessionId } = Route.useRouteContext();
 
 	const [error, setError] = useState<string | null>(null);
 	const formRef = useRef<HTMLFormElement>(null);
@@ -41,60 +60,94 @@ function App() {
 			files: [],
 			fileType: "webp",
 			quality: "75",
-			width: undefined,
+			width: "",
 		} as FormInput,
 		onSubmit: async ({ value }) => {
-			console.log("SUBMITTING");
-			if (!value.files || value.files.length === 0) {
-				setError("No files selected");
-				return;
-			}
-			setDownloadData([]);
-			setIsLoading(true);
-			const promises = value.files.map(async (file) => {
-				if (!file) return;
-				const fileType =
-					value.fileType === "original"
-						? file.name.split(".").at(-1) || "webp"
-						: value.fileType;
-				const formData = new FormData();
-				formData.append("file", file);
-				formData.append("fileType", fileType);
-				formData.append("quality", value.quality);
-				formData.append("width", value.width || "");
-				const optimizedImageBuffer = await optimizeImage({ data: formData });
-				if (optimizedImageBuffer) {
-					const blob = new Blob([new Uint8Array(optimizedImageBuffer)], {
-						type: `image/${fileType}`,
-					});
+			try {
+				if (!value.files || value.files.length === 0) {
+					setError("No files selected");
+					return;
+				}
+				const todayOptimizationsCount = await getOptimizationsCountBySession({
+					data: { sessionId },
+				});
+				if (todayOptimizationsCount >= 20) {
+					setDailyLimitReached(true);
+					setError("Daily optimization limit reached");
+					return;
+				}
+				setDownloadData([]);
+				setIsLoading(true);
 
-					const url = URL.createObjectURL(blob);
-					const newFile = new File(
-						[blob],
-						`${file.name.split(".", -1)[0]}.${fileType}`,
-						{
-							type: blob.type,
-						},
-					);
-					const saved = 100 - (newFile.size / file.size) * 100;
-					setDownloadData((current) => [
-						...current,
-						{
-							filename: newFile.name,
-							url,
-							size: newFile.size,
-							saved: saved,
-						},
-					]);
+				const promises = value.files.map(async (file) => {
+					if (!file) return;
+					const fileType =
+						value.fileType === "original"
+							? file.name.split(".").at(-1) || "webp"
+							: value.fileType;
+					const formData = new FormData();
+					formData.append("file", file);
+					formData.append("fileType", fileType);
+					formData.append("quality", value.quality);
+					formData.append("width", value.width || "");
+					formData.append("sessionId", sessionId);
+					formData.append("userId", session?.user?.id || "");
+					const optimizedImageBuffer = await optimizeImage({ data: formData });
+
+					if (optimizedImageBuffer) {
+						const blob = new Blob([new Uint8Array(optimizedImageBuffer)], {
+							type: `image/${fileType}`,
+						});
+
+						const url = URL.createObjectURL(blob);
+						const newFile = new File(
+							[blob],
+							`${file.name.split(".", -1)[0]}.${fileType}`,
+							{
+								type: blob.type,
+							},
+						);
+						const saved = 100 - (newFile.size / file.size) * 100;
+						setDownloadData((current) => [
+							...current,
+							{
+								filename: newFile.name,
+								url,
+								size: newFile.size,
+								saved: saved,
+							},
+						]);
+						await createOptimizationRecord({
+							data: {
+								fileName: file.name,
+								fileType: fileType,
+								quality: value.quality,
+								width: value.width || undefined,
+								sessionId: sessionId,
+								userId: session?.user?.id,
+							},
+						});
+					}
+					if (error) {
+						console.error(
+							`Error compressing image: ${JSON.stringify({ error })} `,
+						);
+					}
+				});
+				const results = await Promise.allSettled(promises);
+				const failures = results.filter((r) => r.status === "rejected");
+				if (failures.length > 0) {
+					console.error("Some images failed:", failures);
 				}
-				if (error) {
-					console.error(
-						`Error compressing image: ${JSON.stringify({ error })} `,
-					);
-				}
-			});
-			await Promise.all(promises);
-			setIsLoading(false);
+				setIsLoading(false);
+			} catch (err) {
+				console.error("Error optimizing images:", err);
+				setError(
+					err instanceof Error ? err.message : "An unknown error occurred",
+				);
+				setIsLoading(false);
+				setDownloadData([]);
+			}
 		},
 	});
 
@@ -126,12 +179,18 @@ function App() {
 	};
 
 	const resetData = () => {
-		form.reset();
+		form.reset({
+			files: [],
+			fileType: "webp",
+			quality: "75",
+			width: "",
+		});
 		setDownloadData([]);
 		setFilesValue([]);
 		setError(null);
 	};
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
 	useEffect(() => {
 		if (!files || files.length === 0) {
 			setDownloadData([]);
@@ -149,12 +208,23 @@ function App() {
 		}
 	}, [files]);
 
+	useEffect(() => {
+		if (dailyOptimizationsCount && dailyOptimizationsCount >= 20) {
+			setDailyLimitReached(true);
+		} else {
+			setDailyLimitReached(false);
+		}
+	}, [dailyOptimizationsCount]);
+
 	return (
 		<main className="page-wrap px-4 pb-8 pt-14">
 			<section className="grid grid-cols-3 gap-6">
 				<div className="col-span-2 space-y-4">
-					<FileDropzone files={files} setFiles={setFilesValue} />
-					{error && <span className="text-destructive">{error}</span>}
+					<div
+						className={`${dailyLimitReached ? "opacity-50 pointer-events-none" : ""}`}
+					>
+						<FileDropzone files={files} setFiles={setFilesValue} />
+					</div>
 					{files &&
 						files.length > 0 &&
 						downloadData &&
@@ -211,13 +281,19 @@ function App() {
 															</div>
 														</div>
 													</div>
-													<a
-														href={item.url}
-														download={item.filename}
-														className="text-primary-foreground flex justify-center items-center w-8 h-8 min-w-8 min-h-8 bg-foreground rounded-full ring focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2"
+													<Button
+														variant={"default"}
+														className="flex justify-center items-center w-8 h-8 min-w-8 min-h-8 rounded-full"
+														asChild
 													>
-														<Download className="w-4 h-4" />
-													</a>
+														<a
+															href={item.url}
+															download={item.filename}
+															className="flex justify-center items-center w-8 h-8 min-w-8 min-h-8 rounded-full"
+														>
+															<Download className="w-4 h-4" />
+														</a>
+													</Button>
 												</div>
 											</div>
 										);
@@ -232,7 +308,7 @@ function App() {
 									{downloadData.reduce(
 										(sum, item) =>
 											sum +
-											((files.find(
+											((files?.find(
 												(f) =>
 													f.name.split(".")[0] === item.filename.split(".")[0],
 											)?.size || 0) -
@@ -243,7 +319,7 @@ function App() {
 												downloadData.reduce(
 													(sum, item) =>
 														sum +
-														((files.find(
+														((files?.find(
 															(f) =>
 																f.name.split(".")[0] ===
 																item.filename.split(".")[0],
@@ -256,7 +332,7 @@ function App() {
 												downloadData.reduce(
 													(sum, item) =>
 														sum +
-														((files.find(
+														((files?.find(
 															(f) =>
 																f.name.split(".")[0] ===
 																item.filename.split(".")[0],
@@ -268,7 +344,7 @@ function App() {
 									{downloadData.reduce(
 										(sum, item) =>
 											sum +
-											((files.find(
+											((files?.find(
 												(f) =>
 													f.name.split(".")[0] === item.filename.split(".")[0],
 											)?.size || 0) -
@@ -296,6 +372,15 @@ function App() {
 								<Download className="w-4 h-4 mr-2" />
 								Download All (.zip)
 							</Button>
+						</div>
+					)}
+					{error && <span className="text-destructive">{error}</span>}
+					{dailyLimitReached && (
+						<div className="w-max p-6 rounded-3xl border bg-card">
+							<h2 className="text-xl font-bold mb-4">
+								Daily Optimizations Limit Reached
+							</h2>
+							<Button className="w-full">Upgrade Now</Button>
 						</div>
 					)}
 				</div>
@@ -334,31 +419,32 @@ function App() {
 								>
 									<ToggleGroupItem
 										value="avif"
-										className="min-w-fit rounded-xl p-4 border-border"
+										className="min-w-fit rounded-xl! border! p-4"
+										variant={"outline"}
 									>
 										.avif
 									</ToggleGroupItem>
 									<ToggleGroupItem
 										value="webp"
-										className="min-w-fit rounded-xl p-4 border-border"
+										className="min-w-fit rounded-xl! border! p-4"
 									>
 										.webp
 									</ToggleGroupItem>
 									<ToggleGroupItem
 										value="png"
-										className="min-w-fit rounded-xl p-4 border-border"
+										className="min-w-fit rounded-xl! border! p-4"
 									>
 										.png
 									</ToggleGroupItem>
 									<ToggleGroupItem
 										value="jpg"
-										className="min-w-fit rounded-xl p-4 border-border"
+										className="min-w-fit rounded-xl! border! p-4"
 									>
 										.jpg
 									</ToggleGroupItem>
 									<ToggleGroupItem
 										value="original"
-										className="min-w-fit rounded-xl p-4 border-border col-span-2"
+										className="min-w-fit rounded-xl! border! p-4 col-span-2"
 									>
 										original
 									</ToggleGroupItem>
@@ -377,7 +463,7 @@ function App() {
 								</div>
 								<div className="flex items-center gap-4 mt-[.35rem]">
 									<Slider
-										defaultValue={[75]}
+										value={[quality ? parseInt(quality, 10) : 75]}
 										max={100}
 										step={5}
 										min={5}
@@ -427,6 +513,7 @@ function App() {
 							<Button
 								type="submit"
 								className="cursor-pointer rounded-full flex-1"
+								disabled={isLoading || dailyLimitReached}
 							>
 								{isLoading ? (
 									<LoaderCircle className="animate-spin" />

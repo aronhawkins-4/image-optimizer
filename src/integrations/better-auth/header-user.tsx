@@ -11,11 +11,9 @@ import { authClient } from "#/lib/auth-client";
 export default function BetterAuthHeader() {
 	const { data: session, isPending } = authClient.useSession();
 
-	// if (isPending) {
-	// 	return (
-	// 		<div className="h-8 w-8 bg-neutral-100 dark:bg-neutral-800 animate-pulse" />
-	// 	);
-	// }
+	if (isPending) {
+		return <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />;
+	}
 
 	if (session?.user) {
 		return (
@@ -37,9 +35,9 @@ export default function BetterAuthHeader() {
 						)}
 					</DropdownMenuTrigger>
 					<DropdownMenuContent>
-						<DropdownMenuItem>
+						<DropdownMenuItem asChild>
 							<Button
-								variant={"link"}
+								variant={"default"}
 								className="w-full"
 								onClick={() => {
 									void authClient.signOut();

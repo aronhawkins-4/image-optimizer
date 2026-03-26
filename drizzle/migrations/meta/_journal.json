@@ -8,6 +8,13 @@
       "when": 1774388568483,
       "tag": "0000_panoramic_joystick",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1774414494408,
+      "tag": "0001_natural_william_stryker",
+      "breakpoints": true
     }
   ]
 }
