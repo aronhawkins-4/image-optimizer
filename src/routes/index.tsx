@@ -21,17 +21,21 @@ export const Route = createFileRoute("/")({
 	loader: async ({ context }) => {
 		const { data: session } = await authClient.getSession();
 
-		if (
-			!session?.user ||
-			session.user.subscriptionProductId !==
-				process.env.VITE_POLAR_PRO_SUBSCRIPTION_PRODUCT_ID
-		) {
+		const isSubscriptionActive =
+			!!session?.user &&
+			context.products.some((p) => p.id === session.user.subscriptionProductId);
+
+		if (!isSubscriptionActive) {
 			const dailyOptimizations = await getOptimizationsCountBySession({
 				data: { sessionId: context.sessionId },
 			});
-			return dailyOptimizations;
+			return {
+				dailyOptimizations,
+				products: context.products,
+				isSubscriptionActive,
+			};
 		}
-		return null;
+		return { products: context.products, isSubscriptionActive };
 	},
 	component: App,
 });
@@ -50,12 +54,14 @@ export interface DownloadData {
 }
 
 function App() {
-	const dailyOptimizations = Route.useLoaderData();
+	const { dailyOptimizations, products } = Route.useLoaderData();
 	const [dailyLimitReached, setDailyLimitReached] = useState(false);
 	const [downloadData, setDownloadData] = useState<DownloadData[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
-	const [isSubscriptionActive, setIsSubscriptionActive] = useState(false);
-	const { data: session } = authClient.useSession();
+	const [isSubscriptionActive, setIsSubscriptionActive] = useState<
+		boolean | null
+	>(null);
+	const { data: session, isPending: sessionPending } = authClient.useSession();
 	const { sessionId } = Route.useRouteContext();
 
 	const [error, setError] = useState<string | null>(null);
@@ -223,14 +229,11 @@ function App() {
 	}, [dailyOptimizations]);
 
 	useEffect(() => {
-		console.log("User session:", session);
-		if (
-			session?.user?.subscriptionProductId ===
-			process.env.VITE_POLAR_PRO_SUBSCRIPTION_PRODUCT_ID
-		) {
-			setIsSubscriptionActive(true);
-		}
-	}, [session]);
+		if (sessionPending) return;
+		setIsSubscriptionActive(
+			products.some((p) => p.id === session?.user?.subscriptionProductId),
+		);
+	}, [session, sessionPending, products]);
 
 	return (
 		<main className="page-wrap px-4 pb-8 pt-14">
@@ -391,23 +394,29 @@ function App() {
 						</div>
 					)}
 					{error && <span className="text-destructive">{error}</span>}
-					{(dailyLimitReached || !isSubscriptionActive) && (
-						<div className="w-max p-6 rounded-3xl border bg-card">
-							<h2 className="text-xl font-bold mb-4">
-								Daily Optimizations Limit Reached
-							</h2>
-							<Button
-								className="w-full"
-								onClick={async () => {
-									await authClient.checkout({
-										products: ["d9a83150-188c-43de-9dd9-b672d16bcebf"],
-									});
-								}}
-							>
-								Upgrade Now
-							</Button>
-						</div>
-					)}
+					{typeof isSubscriptionActive === "boolean" &&
+						isSubscriptionActive === false && (
+							<div className=" p-6 rounded-3xl border bg-card">
+								<h2 className="text-xl font-bold mb-4">
+									Daily Optimizations Limit Reached
+								</h2>
+								<div className="flex gap-2">
+									{products.map((product) => (
+										<Button
+											key={product.id}
+											className="flex-1"
+											onClick={async () => {
+												await authClient.checkout({
+													products: [product.id],
+												});
+											}}
+										>
+											Upgrade to {product.name}
+										</Button>
+									))}
+								</div>
+							</div>
+						)}
 				</div>
 				<div className="col-span-1">
 					<form

@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { authClient } from "#/lib/auth-client";
+import { getProducts } from "#/lib/product-functions";
 import { getSessionId } from "#/lib/session-functions";
 import Footer from "../components/Footer";
 import Header from "../components/Header";
@@ -43,8 +44,8 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 	}),
 	beforeLoad: async () => {
 		const sessionId = await getSessionId();
-
-		return { sessionId };
+		const products = await getProducts();
+		return { sessionId, products };
 	},
 	shellComponent: RootDocument,
 });

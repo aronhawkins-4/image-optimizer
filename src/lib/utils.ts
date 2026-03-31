@@ -12,3 +12,12 @@ export function formatFileSize(bytes: number): string {
 	const size = bytes / 1024 ** i;
 	return `${size.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
 }
+
+export function slugify(text: string): string {
+	return text
+		.toLowerCase()
+		.trim()
+		.replace(/[^\w\s-]/g, "")
+		.replace(/\s+/g, "-")
+		.replace(/-+/g, "-");
+}
