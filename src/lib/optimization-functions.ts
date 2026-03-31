@@ -1,9 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { eq } from "drizzle-orm";
 import sharp from "sharp";
 import { z } from "zod";
 import db from "#/db/index";
 import { optimizations } from "#/db/schema";
+import { auth } from "./auth";
+import { UNAUTHORIZED_OPTIMIZATION_LIMIT } from "./constants";
 
 const inputSchema = z.object({
 	file: z.instanceof(File),
@@ -32,8 +35,20 @@ export const optimizeImage = createServerFn({ method: "POST" })
 		});
 	})
 	.handler(async ({ data }) => {
-		const { file, fileType: type, quality, width, userId, sessionId } = data;
+		const { file, fileType: type, quality, width, sessionId } = data;
+		const request = getRequest();
+		const session = await auth.api.getSession({ headers: request.headers });
+		const user = session?.user;
 
+		if (!user || !user?.subscriptionProductId) {
+			const optimizationCount = await getOptimizationsBySession({
+				data: { sessionId },
+			});
+
+			if (optimizationCount > UNAUTHORIZED_OPTIMIZATION_LIMIT) {
+				throw new Error("Daily optimization limit reached.");
+			}
+		}
 		const arrayBuffer = await file.arrayBuffer();
 		const bytes = new Uint8Array(arrayBuffer);
 

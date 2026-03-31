@@ -6,10 +6,8 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
-import { authClient } from "#/lib/auth-client";
 import { getProducts } from "#/lib/product-functions";
 import { getSessionId } from "#/lib/session-functions";
-import Footer from "../components/Footer";
 import Header from "../components/Header";
 import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
 import TanStackQueryProvider from "../integrations/tanstack-query/root-provider";
@@ -32,7 +30,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 				content: "width=device-width, initial-scale=1",
 			},
 			{
-				title: "TanStack Start Starter",
+				title: "Image Optimize",
 			},
 		],
 		links: [
@@ -54,6 +52,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 	return (
 		<html lang="en" suppressHydrationWarning>
 			<head>
+				{/** biome-ignore lint/security/noDangerouslySetInnerHtml: <explanation> */}
 				<script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
 				<HeadContent />
 			</head>
@@ -61,7 +60,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<TanStackQueryProvider>
 					<Header />
 					{children}
-					{/* <Footer /> */}
 					<TanStackDevtools
 						config={{
 							position: "bottom-right",

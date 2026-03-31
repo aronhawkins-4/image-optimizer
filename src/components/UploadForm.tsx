@@ -161,12 +161,13 @@ export const UploadForm = () => {
 								}
 							}}
 						>
-							<ToggleGroupItem value="avif" className="min-w-fit rounded-lg">
-								.avif
-							</ToggleGroupItem>
 							<ToggleGroupItem value="webp" className="min-w-fit rounded-lg">
 								.webp
 							</ToggleGroupItem>
+							<ToggleGroupItem value="avif" className="min-w-fit rounded-lg">
+								.avif
+							</ToggleGroupItem>
+
 							<ToggleGroupItem value="png" className="min-w-fit rounded-lg">
 								.png
 							</ToggleGroupItem>

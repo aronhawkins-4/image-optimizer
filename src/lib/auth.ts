@@ -61,7 +61,7 @@ export const auth = betterAuth({
 			},
 		},
 	},
-	baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
+	baseURL: process.env.VITE_SERVER_URL || "http://localhost:3000",
 	plugins: [
 		tanstackStartCookies(),
 		polar({
@@ -78,7 +78,9 @@ export const auth = betterAuth({
 					// An optional URL which renders a back-button in the Checkout
 					returnUrl: process.env.VITE_SERVER_URL || "http://localhost:3000",
 				}),
-				portal(),
+				portal({
+					returnUrl: process.env.VITE_SERVER_URL || "http://localhost:3000",
+				}),
 				webhooks({
 					secret: process.env.POLAR_WEBHOOK_SECRET || "",
 					onSubscriptionActive: async (payload) => {

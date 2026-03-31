@@ -1,5 +1,5 @@
 import { useForm, useStore } from "@tanstack/react-form";
-import { createFileRoute, useRouteContext } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import JSZip from "jszip";
 import { ArrowRight, Download, LoaderCircle, RefreshCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -10,6 +10,7 @@ import { Label } from "#/components/ui/label";
 import { Slider } from "#/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import { authClient } from "#/lib/auth-client";
+import { UNAUTHORIZED_OPTIMIZATION_LIMIT } from "#/lib/constants";
 import {
 	createOptimizationRecord,
 	getOptimizationsCountBySession,
@@ -19,23 +20,13 @@ import { formatFileSize } from "#/lib/utils";
 
 export const Route = createFileRoute("/")({
 	loader: async ({ context }) => {
-		const { data: session } = await authClient.getSession();
-
-		const isSubscriptionActive =
-			!!session?.user &&
-			context.products.some((p) => p.id === session.user.subscriptionProductId);
-
-		if (!isSubscriptionActive) {
-			const dailyOptimizations = await getOptimizationsCountBySession({
-				data: { sessionId: context.sessionId },
-			});
-			return {
-				dailyOptimizations,
-				products: context.products,
-				isSubscriptionActive,
-			};
-		}
-		return { products: context.products, isSubscriptionActive };
+		const initialDailyOptimizations = await getOptimizationsCountBySession({
+			data: { sessionId: context.sessionId },
+		});
+		return {
+			initialDailyOptimizations,
+			products: context.products,
+		};
 	},
 	component: App,
 });
@@ -54,7 +45,7 @@ export interface DownloadData {
 }
 
 function App() {
-	const { dailyOptimizations, products } = Route.useLoaderData();
+	const { initialDailyOptimizations, products } = Route.useLoaderData();
 	const [dailyLimitReached, setDailyLimitReached] = useState(false);
 	const [downloadData, setDownloadData] = useState<DownloadData[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
@@ -80,10 +71,13 @@ function App() {
 					setError("No files selected");
 					return;
 				}
-				const todayOptimizationsCount = await getOptimizationsCountBySession({
+				const dailyOptimizationsCount = await getOptimizationsCountBySession({
 					data: { sessionId },
 				});
-				if (todayOptimizationsCount >= 20) {
+				if (
+					!isSubscriptionActive &&
+					dailyOptimizationsCount > UNAUTHORIZED_OPTIMIZATION_LIMIT
+				) {
 					setDailyLimitReached(true);
 					setError("Daily optimization limit reached");
 					return;
@@ -140,16 +134,17 @@ function App() {
 							},
 						});
 					}
-					if (error) {
-						console.error(
-							`Error compressing image: ${JSON.stringify({ error })} `,
-						);
-					}
 				});
 				const results = await Promise.allSettled(promises);
 				const failures = results.filter((r) => r.status === "rejected");
 				if (failures.length > 0) {
 					console.error("Some images failed:", failures);
+					setError(
+						failures[0].reason instanceof Error
+							? failures[0].reason.message
+							: String(failures[0].reason) ||
+									"An unknown error occurred during optimization",
+					);
 				}
 				setIsLoading(false);
 			} catch (err) {
@@ -221,12 +216,16 @@ function App() {
 	}, [files]);
 
 	useEffect(() => {
-		if (dailyOptimizations && dailyOptimizations >= 20) {
+		if (
+			!sessionPending &&
+			!isSubscriptionActive &&
+			initialDailyOptimizations > UNAUTHORIZED_OPTIMIZATION_LIMIT
+		) {
 			setDailyLimitReached(true);
 		} else {
 			setDailyLimitReached(false);
 		}
-	}, [dailyOptimizations]);
+	}, [initialDailyOptimizations, sessionPending, isSubscriptionActive]);
 
 	useEffect(() => {
 		if (sessionPending) return;
@@ -393,18 +392,19 @@ function App() {
 							</Button>
 						</div>
 					)}
-					{error && <span className="text-destructive">{error}</span>}
-					{typeof isSubscriptionActive === "boolean" &&
+					{error && (
+						<span className="block text-destructive mb-4">{error}</span>
+					)}
+					{session?.user &&
+						!sessionPending &&
 						isSubscriptionActive === false && (
-							<div className=" p-6 rounded-3xl border bg-card">
-								<h2 className="text-xl font-bold mb-4">
-									Daily Optimizations Limit Reached
-								</h2>
+							<div className="p-6 rounded-3xl border bg-card max-w-lg">
+								<h2 className="text-xl font-bold mb-4">Upgrade Now</h2>
 								<div className="flex gap-2">
 									{products.map((product) => (
 										<Button
 											key={product.id}
-											className="flex-1"
+											className="flex-1 rounded-full"
 											onClick={async () => {
 												await authClient.checkout({
 													products: [product.id],
@@ -417,6 +417,16 @@ function App() {
 								</div>
 							</div>
 						)}
+					{!session?.user && !sessionPending && (
+						<div className="p-6 rounded-3xl border bg-card max-w-max mx-auto">
+							<h2 className="text-xl font-bold mb-4">Sign In to Upgrade</h2>
+							<div className="flex gap-2">
+								<Button className="flex-1 rounded-full" asChild>
+									<Link to="/sign-in">Sign In</Link>
+								</Button>
+							</div>
+						</div>
+					)}
 				</div>
 				<div className="col-span-1">
 					<form
@@ -452,18 +462,19 @@ function App() {
 									}}
 								>
 									<ToggleGroupItem
+										value="webp"
+										className="min-w-fit rounded-xl! border! p-4"
+									>
+										.webp
+									</ToggleGroupItem>
+									<ToggleGroupItem
 										value="avif"
 										className="min-w-fit rounded-xl! border! p-4"
 										variant={"outline"}
 									>
 										.avif
 									</ToggleGroupItem>
-									<ToggleGroupItem
-										value="webp"
-										className="min-w-fit rounded-xl! border! p-4"
-									>
-										.webp
-									</ToggleGroupItem>
+
 									<ToggleGroupItem
 										value="png"
 										className="min-w-fit rounded-xl! border! p-4"

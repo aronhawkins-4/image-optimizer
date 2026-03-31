@@ -1,3 +1,4 @@
+import { polarClient } from "@polar-sh/better-auth";
 import { Link } from "@tanstack/react-router";
 import { Button } from "#/components/ui/button";
 import {
@@ -35,10 +36,21 @@ export default function BetterAuthHeader() {
 						)}
 					</DropdownMenuTrigger>
 					<DropdownMenuContent>
-						<DropdownMenuItem asChild>
+						<DropdownMenuItem>
 							<Button
-								variant={"default"}
-								className="w-full"
+								variant={"link"}
+								className="w-full text-white"
+								onClick={async () => {
+									await authClient.customer.portal();
+								}}
+							>
+								Billing
+							</Button>
+						</DropdownMenuItem>
+						<DropdownMenuItem>
+							<Button
+								variant={"link"}
+								className="w-full text-white"
 								onClick={() => {
 									void authClient.signOut();
 								}}
