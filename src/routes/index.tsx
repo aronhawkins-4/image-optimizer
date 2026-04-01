@@ -53,6 +53,7 @@ function App() {
 		boolean | null
 	>(null);
 	const { data: session, isPending: sessionPending } = authClient.useSession();
+	const prevUserIdRef = useRef(session?.user?.id);
 	const { sessionId } = Route.useRouteContext();
 
 	const [error, setError] = useState<string | null>(null);
@@ -214,6 +215,15 @@ function App() {
 			);
 		}
 	}, [files]);
+
+	useEffect(() => {
+		if (prevUserIdRef.current !== session?.user?.id) {
+			prevUserIdRef.current = session?.user?.id;
+			if (!sessionPending) {
+				resetData();
+			}
+		}
+	}, [session, sessionPending]);
 
 	useEffect(() => {
 		if (

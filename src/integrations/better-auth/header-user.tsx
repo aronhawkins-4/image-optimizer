@@ -51,8 +51,8 @@ export default function BetterAuthHeader() {
 							<Button
 								variant={"link"}
 								className="w-full text-white"
-								onClick={() => {
-									void authClient.signOut();
+								onClick={async () => {
+									await authClient.signOut();
 								}}
 							>
 								Sign out
