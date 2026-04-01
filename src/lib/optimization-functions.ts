@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { eq } from "drizzle-orm";
-import sharp from "sharp";
+import { and, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import db from "#/db/index";
 import { optimizations } from "#/db/schema";
@@ -45,10 +44,14 @@ export const optimizeImage = createServerFn({ method: "POST" })
 				data: { sessionId },
 			});
 
-			if (optimizationCount > UNAUTHORIZED_OPTIMIZATION_LIMIT) {
+			if (optimizationCount >= UNAUTHORIZED_OPTIMIZATION_LIMIT) {
 				throw new Error("Daily optimization limit reached.");
 			}
 		}
+		const sharp = (await import("sharp")).default;
+		sharp.concurrency(1);
+		sharp.cache(false);
+
 		const arrayBuffer = await file.arrayBuffer();
 		const bytes = new Uint8Array(arrayBuffer);
 
@@ -113,10 +116,15 @@ export const getOptimizationsBySession = createServerFn()
 export const getOptimizationsCountBySession = createServerFn()
 	.inputValidator(z.object({ sessionId: z.string() }))
 	.handler(async ({ data }) => {
+		const date = new Date();
+		date.setHours(0, 0, 0, 0);
 		try {
 			const optimizationsCount = await db.$count(
 				optimizations,
-				eq(optimizations.sessionId, data.sessionId),
+				and(
+					eq(optimizations.sessionId, data.sessionId),
+					gte(optimizations.createdAt, date),
+				),
 			);
 			return optimizationsCount;
 		} catch (error) {

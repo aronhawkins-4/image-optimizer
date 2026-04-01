@@ -46,6 +46,9 @@ export interface DownloadData {
 
 function App() {
 	const { initialDailyOptimizations, products } = Route.useLoaderData();
+	const [dailyOptimizations, setDailyOptimizations] = useState(
+		initialDailyOptimizations,
+	);
 	const [dailyLimitReached, setDailyLimitReached] = useState(false);
 	const [downloadData, setDownloadData] = useState<DownloadData[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
@@ -58,6 +61,21 @@ function App() {
 
 	const [error, setError] = useState<string | null>(null);
 	const formRef = useRef<HTMLFormElement>(null);
+
+	const checkDailyOptimizationLimit = () => {
+		if (
+			!isSubscriptionActive &&
+			!sessionPending &&
+			dailyOptimizations >= UNAUTHORIZED_OPTIMIZATION_LIMIT
+		) {
+			setDailyLimitReached(true);
+			setError("Daily optimization limit reached");
+			return true;
+		} else {
+			setDailyLimitReached(false);
+			return false;
+		}
+	};
 
 	const form = useForm({
 		defaultValues: {
@@ -72,72 +90,74 @@ function App() {
 					setError("No files selected");
 					return;
 				}
-				const dailyOptimizationsCount = await getOptimizationsCountBySession({
-					data: { sessionId },
-				});
-				if (
-					!isSubscriptionActive &&
-					dailyOptimizationsCount > UNAUTHORIZED_OPTIMIZATION_LIMIT
-				) {
-					setDailyLimitReached(true);
-					setError("Daily optimization limit reached");
+				if (dailyLimitReached) {
 					return;
 				}
+
 				setDownloadData([]);
 				setIsLoading(true);
 
-				const promises = value.files.map(async (file) => {
-					if (!file) return;
-					const fileType =
-						value.fileType === "original"
-							? file.name.split(".").at(-1) || "webp"
-							: value.fileType;
-					const formData = new FormData();
-					formData.append("file", file);
-					formData.append("fileType", fileType);
-					formData.append("quality", value.quality);
-					formData.append("width", value.width || "");
-					formData.append("sessionId", sessionId);
-					formData.append("userId", session?.user?.id || "");
-					const optimizedImageBuffer = await optimizeImage({ data: formData });
-
-					if (optimizedImageBuffer) {
-						const blob = new Blob([new Uint8Array(optimizedImageBuffer)], {
-							type: `image/${fileType}`,
-						});
-
-						const url = URL.createObjectURL(blob);
-						const newFile = new File(
-							[blob],
-							`${file.name.split(".", -1)[0]}.${fileType}`,
-							{
-								type: blob.type,
-							},
-						);
-						const saved = 100 - (newFile.size / file.size) * 100;
-						setDownloadData((current) => [
-							...current,
-							{
-								filename: newFile.name,
-								url,
-								size: newFile.size,
-								saved: saved,
-							},
-						]);
-						await createOptimizationRecord({
-							data: {
-								fileName: file.name,
-								fileType: fileType,
-								quality: value.quality,
-								width: value.width || undefined,
-								sessionId: sessionId,
-								userId: session?.user?.id,
-							},
-						});
+				const failures: { reason: unknown }[] = [];
+				for (const file of value.files) {
+					if (!file) continue;
+					if (checkDailyOptimizationLimit()) {
+						return;
 					}
-				});
-				const results = await Promise.allSettled(promises);
-				const failures = results.filter((r) => r.status === "rejected");
+					try {
+						const fileType =
+							value.fileType === "original"
+								? file.name.split(".").at(-1) || "webp"
+								: value.fileType;
+						const formData = new FormData();
+						formData.append("file", file);
+						formData.append("fileType", fileType);
+						formData.append("quality", value.quality);
+						formData.append("width", value.width || "");
+						formData.append("sessionId", sessionId);
+						formData.append("userId", session?.user?.id || "");
+						const optimizedImageBuffer = await optimizeImage({
+							data: formData,
+						});
+
+						if (optimizedImageBuffer) {
+							const blob = new Blob([new Uint8Array(optimizedImageBuffer)], {
+								type: `image/${fileType}`,
+							});
+
+							const url = URL.createObjectURL(blob);
+							const newFile = new File(
+								[blob],
+								`${file.name.split(".", -1)[0]}.${fileType}`,
+								{
+									type: blob.type,
+								},
+							);
+							const saved = 100 - (newFile.size / file.size) * 100;
+							setDownloadData((current) => [
+								...current,
+								{
+									filename: newFile.name,
+									url,
+									size: newFile.size,
+									saved: saved,
+								},
+							]);
+							await createOptimizationRecord({
+								data: {
+									fileName: file.name,
+									fileType: fileType,
+									quality: value.quality,
+									width: value.width || undefined,
+									sessionId: sessionId,
+									userId: session?.user?.id,
+								},
+							});
+						}
+						setDailyOptimizations((current) => current + 1);
+					} catch (reason) {
+						failures.push({ reason });
+					}
+				}
 				if (failures.length > 0) {
 					console.error("Some images failed:", failures);
 					setError(
@@ -150,9 +170,7 @@ function App() {
 				setIsLoading(false);
 			} catch (err) {
 				console.error("Error optimizing images:", err);
-				setError(
-					err instanceof Error ? err.message : "An unknown error occurred",
-				);
+				setError("An unknown error occurred");
 				setIsLoading(false);
 				setDownloadData([]);
 			}
@@ -216,6 +234,7 @@ function App() {
 		}
 	}, [files]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: <explanation>
 	useEffect(() => {
 		if (prevUserIdRef.current !== session?.user?.id) {
 			prevUserIdRef.current = session?.user?.id;
@@ -226,15 +245,7 @@ function App() {
 	}, [session, sessionPending]);
 
 	useEffect(() => {
-		if (
-			!sessionPending &&
-			!isSubscriptionActive &&
-			initialDailyOptimizations > UNAUTHORIZED_OPTIMIZATION_LIMIT
-		) {
-			setDailyLimitReached(true);
-		} else {
-			setDailyLimitReached(false);
-		}
+		checkDailyOptimizationLimit();
 	}, [initialDailyOptimizations, sessionPending, isSubscriptionActive]);
 
 	useEffect(() => {
@@ -427,16 +438,6 @@ function App() {
 								</div>
 							</div>
 						)}
-					{!session?.user && !sessionPending && (
-						<div className="p-6 rounded-3xl border bg-card max-w-max mx-auto">
-							<h2 className="text-xl font-bold mb-4">Sign In to Upgrade</h2>
-							<div className="flex gap-2">
-								<Button className="flex-1 rounded-full" asChild>
-									<Link to="/sign-in">Sign In</Link>
-								</Button>
-							</div>
-						</div>
-					)}
 				</div>
 				<div className="col-span-1">
 					<form
@@ -547,6 +548,7 @@ function App() {
 									onKeyDown={(e) => {
 										if (e.key === "Enter") {
 											e.preventDefault();
+											e.currentTarget.blur();
 											formRef.current?.requestSubmit();
 										}
 									}}
@@ -578,6 +580,27 @@ function App() {
 							</Button>
 						</div>
 					</form>
+					<div className="my-6 text-sm text-muted-foreground">
+						{!sessionPending && !isSubscriptionActive && (
+							<>
+								<strong>
+									{UNAUTHORIZED_OPTIMIZATION_LIMIT - dailyOptimizations}/
+									{UNAUTHORIZED_OPTIMIZATION_LIMIT}
+								</strong>{" "}
+								daily optimizations remaining.
+							</>
+						)}
+					</div>
+					{!session?.user && !sessionPending && (
+						<div className="p-6 rounded-3xl border bg-card max-w-max">
+							<h2 className="text-xl font-bold mb-4">Sign In to Upgrade</h2>
+							<div className="flex gap-2">
+								<Button className="flex-1 rounded-full" asChild>
+									<Link to="/sign-in">Sign In</Link>
+								</Button>
+							</div>
+						</div>
+					)}
 				</div>
 			</section>
 		</main>
