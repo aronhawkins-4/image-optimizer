@@ -10,7 +10,17 @@ import { Label } from "#/components/ui/label";
 import { Slider } from "#/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import { authClient } from "#/lib/auth-client";
-import { UNAUTHORIZED_OPTIMIZATION_LIMIT } from "#/lib/constants";
+import {
+	PREMIUM_SUBSCRIPTION_FILE_LIMIT,
+	PREMIUM_SUBSCRIPTION_MAX_FILE_SIZE_MB,
+	PREMIUM_SUBSCRIPTION_NAME,
+	PRO_SUBSCRIPTION_FILE_LIMIT,
+	PRO_SUBSCRIPTION_MAX_FILE_SIZE_MB,
+	PRO_SUBSCRIPTION_NAME,
+	UNAUTHORIZED_FILE_LIMIT,
+	UNAUTHORIZED_MAX_FILE_SIZE_MB,
+	UNAUTHORIZED_OPTIMIZATION_LIMIT,
+} from "#/lib/constants";
 import {
 	createOptimizationRecord,
 	getOptimizationsCountBySession,
@@ -46,36 +56,42 @@ export interface DownloadData {
 
 function App() {
 	const { initialDailyOptimizations, products } = Route.useLoaderData();
+	const { sessionId } = Route.useRouteContext();
 	const [dailyOptimizations, setDailyOptimizations] = useState(
 		initialDailyOptimizations,
 	);
-	const [dailyLimitReached, setDailyLimitReached] = useState(false);
+
 	const [downloadData, setDownloadData] = useState<DownloadData[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
-	const [isSubscriptionActive, setIsSubscriptionActive] = useState<
-		boolean | null
-	>(null);
 	const { data: session, isPending: sessionPending } = authClient.useSession();
+	const activeSubscription = products.find(
+		(p) => p.id === session?.user?.subscriptionProductId,
+	);
+	const dailyLimitReached =
+		!activeSubscription &&
+		!sessionPending &&
+		dailyOptimizations >= UNAUTHORIZED_OPTIMIZATION_LIMIT;
+	const maxFileSizeMB =
+		activeSubscription?.name === PREMIUM_SUBSCRIPTION_NAME
+			? PREMIUM_SUBSCRIPTION_MAX_FILE_SIZE_MB
+			: activeSubscription?.name === PRO_SUBSCRIPTION_NAME
+				? PRO_SUBSCRIPTION_MAX_FILE_SIZE_MB
+				: UNAUTHORIZED_MAX_FILE_SIZE_MB;
+	const maxFiles =
+		activeSubscription?.name === PREMIUM_SUBSCRIPTION_NAME
+			? PREMIUM_SUBSCRIPTION_FILE_LIMIT
+			: activeSubscription?.name === PRO_SUBSCRIPTION_NAME
+				? PRO_SUBSCRIPTION_FILE_LIMIT
+				: UNAUTHORIZED_FILE_LIMIT;
+
 	const prevUserIdRef = useRef(session?.user?.id);
-	const { sessionId } = Route.useRouteContext();
 
-	const [error, setError] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(
+		dailyLimitReached
+			? "Daily optimization limit reached. Upgrade your account to continue."
+			: null,
+	);
 	const formRef = useRef<HTMLFormElement>(null);
-
-	const checkDailyOptimizationLimit = () => {
-		if (
-			!isSubscriptionActive &&
-			!sessionPending &&
-			dailyOptimizations >= UNAUTHORIZED_OPTIMIZATION_LIMIT
-		) {
-			setDailyLimitReached(true);
-			setError("Daily optimization limit reached");
-			return true;
-		} else {
-			setDailyLimitReached(false);
-			return false;
-		}
-	};
 
 	const form = useForm({
 		defaultValues: {
@@ -98,10 +114,18 @@ function App() {
 				setIsLoading(true);
 
 				const failures: { reason: unknown }[] = [];
+				let processedCount = 0;
 				for (const file of value.files) {
 					if (!file) continue;
-					if (checkDailyOptimizationLimit()) {
-						return;
+					if (
+						!activeSubscription &&
+						dailyOptimizations + processedCount >=
+							UNAUTHORIZED_OPTIMIZATION_LIMIT
+					) {
+						setError(
+							"Daily optimization limit reached. Upgrade your account to continue.",
+						);
+						break;
 					}
 					try {
 						const fileType =
@@ -154,6 +178,7 @@ function App() {
 							});
 						}
 						setDailyOptimizations((current) => current + 1);
+						processedCount++;
 					} catch (reason) {
 						failures.push({ reason });
 					}
@@ -244,16 +269,12 @@ function App() {
 		}
 	}, [session, sessionPending]);
 
-	useEffect(() => {
-		checkDailyOptimizationLimit();
-	}, [initialDailyOptimizations, sessionPending, isSubscriptionActive]);
-
-	useEffect(() => {
-		if (sessionPending) return;
-		setIsSubscriptionActive(
-			products.some((p) => p.id === session?.user?.subscriptionProductId),
-		);
-	}, [session, sessionPending, products]);
+	// useEffect(() => {
+	// 	if (sessionPending) return;
+	// 	setIsSubscriptionActive(
+	// 		products.some((p) => p.id === session?.user?.subscriptionProductId),
+	// 	);
+	// }, [session, sessionPending, products]);
 
 	return (
 		<main className="page-wrap px-4 pb-8 pt-14">
@@ -262,8 +283,17 @@ function App() {
 					<div
 						className={`${dailyLimitReached ? "opacity-50 pointer-events-none" : ""}`}
 					>
-						<FileDropzone files={files} setFiles={setFilesValue} />
+						<FileDropzone
+							files={files}
+							setFiles={setFilesValue}
+							maxFiles={maxFiles}
+							maxSizeMb={maxFileSizeMB}
+							setError={setError}
+						/>
 					</div>
+					{error && (
+						<span className="block text-destructive mb-4">{error}</span>
+					)}
 					{files &&
 						files.length > 0 &&
 						downloadData &&
@@ -413,31 +443,27 @@ function App() {
 							</Button>
 						</div>
 					)}
-					{error && (
-						<span className="block text-destructive mb-4">{error}</span>
-					)}
-					{session?.user &&
-						!sessionPending &&
-						isSubscriptionActive === false && (
-							<div className="p-6 rounded-3xl border bg-card max-w-lg">
-								<h2 className="text-xl font-bold mb-4">Upgrade Now</h2>
-								<div className="flex gap-2">
-									{products.map((product) => (
-										<Button
-											key={product.id}
-											className="flex-1 rounded-full"
-											onClick={async () => {
-												await authClient.checkout({
-													products: [product.id],
-												});
-											}}
-										>
-											Upgrade to {product.name}
-										</Button>
-									))}
-								</div>
+
+					{session?.user && !activeSubscription && (
+						<div className="p-6 rounded-3xl border bg-card max-w-lg">
+							<h2 className="text-xl font-bold mb-4">Upgrade Now</h2>
+							<div className="flex gap-2">
+								{products.map((product) => (
+									<Button
+										key={product.id}
+										className="flex-1 rounded-full"
+										onClick={async () => {
+											await authClient.checkout({
+												products: [product.id],
+											});
+										}}
+									>
+										Upgrade to {product.name}
+									</Button>
+								))}
 							</div>
-						)}
+						</div>
+					)}
 				</div>
 				<div className="col-span-1">
 					<form
@@ -581,7 +607,7 @@ function App() {
 						</div>
 					</form>
 					<div className="my-6 text-sm text-muted-foreground">
-						{!sessionPending && !isSubscriptionActive && (
+						{!activeSubscription && (
 							<>
 								<strong>
 									{UNAUTHORIZED_OPTIMIZATION_LIMIT - dailyOptimizations}/
@@ -591,13 +617,31 @@ function App() {
 							</>
 						)}
 					</div>
-					{!session?.user && !sessionPending && (
+					{dailyLimitReached && (
 						<div className="p-6 rounded-3xl border bg-card max-w-max">
-							<h2 className="text-xl font-bold mb-4">Sign In to Upgrade</h2>
+							<h2 className="text-xl font-bold mb-4">Upgrade to continue</h2>
 							<div className="flex gap-2">
-								<Button className="flex-1 rounded-full" asChild>
-									<Link to="/sign-in">Sign In</Link>
-								</Button>
+								{session?.user ? (
+									<div className="flex gap-2">
+										{products.map((product) => (
+											<Button
+												key={product.id}
+												className="flex-1 rounded-full"
+												onClick={async () => {
+													await authClient.checkout({
+														products: [product.id],
+													});
+												}}
+											>
+												Upgrade to {product.name}
+											</Button>
+										))}
+									</div>
+								) : (
+									<Button className="flex-1 rounded-full" asChild>
+										<Link to="/sign-in">Upgrade</Link>
+									</Button>
+								)}
 							</div>
 						</div>
 					)}

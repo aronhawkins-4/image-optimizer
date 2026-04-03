@@ -1,24 +1,31 @@
 import { CloudUpload, ImageUp, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { type DropzoneOptions, useDropzone } from "react-dropzone";
+
 import { DropzoneRow } from "./DropzoneRow";
 
 interface FileDropzoneProps {
 	files: File[] | undefined;
 	setFiles: (files: File[]) => void;
-	// setError: (message: string) => void;
+	maxSizeMb?: number;
+	maxFiles?: number;
+	setError: (message: string) => void;
 	// clearError: () => void;
 }
 
 export const FileDropzone: React.FC<FileDropzoneProps> = ({
 	files,
 	setFiles,
+	maxSizeMb,
+	maxFiles,
+	setError,
 }) => {
 	const [data, setData] = useState<
 		{ file: File; width: number; height: number }[]
 	>([]);
 
 	const [isLoading, setIsLoading] = useState(false);
+
 	const { getRootProps, getInputProps, isDragActive, isDragReject, open } =
 		useDropzone({
 			accept: {
@@ -28,17 +35,27 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
 				"image/webp": [".webp"],
 				"image/avif": [".avif"],
 			},
+			maxFiles: maxFiles,
+			maxSize: maxSizeMb ? maxSizeMb * 1024 * 1024 : undefined,
 			onDrop: (acceptedFiles, rejectedFiles, event) => {
-				// setData([]);
-				if (acceptedFiles) {
-					files
-						? setFiles([...files, ...acceptedFiles])
-						: setFiles(acceptedFiles);
+				const currentFiles = files ?? [];
+				const remaining = maxFiles
+					? maxFiles - currentFiles.length
+					: acceptedFiles.length;
+				if (remaining <= 0) {
+					setError(`Too many files. Max number of files is ${maxFiles}.`);
+					return;
 				}
-				if (rejectedFiles && rejectedFiles.length > 0) {
-					// setError("Please select a valid file");
+				const filesToAdd = acceptedFiles.slice(0, remaining);
+				setFiles([...currentFiles, ...filesToAdd]);
+
+				if (
+					rejectedFiles.length > 0 ||
+					filesToAdd.length < acceptedFiles.length
+				) {
+					setError(`Too many files. Max number of files is ${maxFiles}.`);
 				} else {
-					// clearError();
+					setError("");
 				}
 			},
 		});
